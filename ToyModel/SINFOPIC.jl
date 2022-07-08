@@ -18,7 +18,8 @@ using LocalFilters
 using StatsBase
 using ImageFiltering
 using SparseArrays
-
+using Revise
+using StatsBase,Statistics
 
 
 """
@@ -127,7 +128,7 @@ end
 """
     Residual(image1::Matrix{T},image2::Matrix{T}) where T
 
-Return the residual image `image1` minus `image2`
+Return the residual image `image1` minus `image2` as a Matrix{T}
 """
 function Residual(image1::Matrix{T},image2::Matrix{T}) where T
     if size(image1) != size(image2)
@@ -154,7 +155,7 @@ end
 """
     Contrast(image::Matrix{Float64},dim::Int)
 
-Return the `constrast` of an `image` along the dimension `Dim` (#can be normalized by image lenght in `dim` dimension)
+Return the `contrast` vector (as defined in part 2.2 of the assosiated report) of an `image` along the dimension `Dim` (#can be normalized by image lenght in `dim` dimension) 
 """
 function Contrast(image::Matrix{Float64},dim::Int)
     return sum(image,dims=dim) #./ size(image)[dim]
@@ -167,7 +168,7 @@ end
 """
     badfibre,badwave = BadPixMap(fibre::Matrix{Float64},wave::Matrix{Float64})
 
-Return a simple `bad pixel map` from `fibre` and `wave` frames. (bad pixels are flagged with 0 weight when outside a median filter) 
+Return a simple `bad pixel map` from `fibre` and `wave` frames (as a matrix of float64). (bad pixels are flagged with 0 weight when outside a median filter) 
 """
 function BadPixMap(fibre::Matrix{Float64},wave::Matrix{Float64})
     #bad pixel map for fibre
@@ -196,9 +197,9 @@ function BadPixMap(fibre::Matrix{Float64},wave::Matrix{Float64})
 end
 
 """
-    ImageWarp(image::Matrix{Float64},Poly1::Poly2D,Poly2::Poly2D,axes::Tuple{Base.OneTo{Int64}, Base.OneTo{Int64}})
+    deformedimage = ImageWarp(image::Matrix{Float64},Poly1::Poly2D,Poly2::Poly2D,axes::Tuple{Base.OneTo{Int64}, Base.OneTo{Int64}})
 
-Return a `warped tranformed image` with the 2D Polynomial associated with `Poly`, `axes` mark the warped image frame.
+Return a `warped transformed image` with the 2D Polynomial associated with `Poly`, `axes` mark the warped image frame. (see section 2.1.1 in report)
 """
 function ImageWarp(image::Matrix{Float64},Poly1::Poly2D,Poly2::Poly2D,axes::Tuple{Base.OneTo{Int64}, Base.OneTo{Int64}})
 
@@ -209,16 +210,17 @@ function ImageWarp(image::Matrix{Float64},Poly1::Poly2D,Poly2::Poly2D,axes::Tupl
 end
 
 """
-    ImageWarp2(image::Matrix{Float64},wgt::Matrix{Float64},Poly1::Poly2D,Poly2::Poly2D)
+    deformedimage = ImageWarp2(image::Matrix{Float64},wgt::Matrix{Float64},Poly1::Poly2D,Poly2::Poly2D)
 
 Return a `warped tranformed image` with the 2D Polynomial associated with `Poly` (experimental version with weight map `wgt`, realy slow and was not extensively tested)
 """
 function ImageWarp2(image::Matrix{Float64},wgt::Matrix{Float64},Poly1::Poly2D,Poly2::Poly2D)
 
     ϕ(x) = (Poly1(x[1],x[2]),Poly2(x[1],x[2]))
-    ker = CatmullRomSpline()    
-    I = size(image)[1]
-    J = size(image)[2]
+    ker = CatmullRomSpline()  
+    
+    (I,J) = size(image)
+
     imwarped = zeros(I,J)
     range = 5
     @inbounds for j in 1:J-1
@@ -244,10 +246,10 @@ function ImageWarp2(image::Matrix{Float64},wgt::Matrix{Float64},Poly1::Poly2D,Po
 end
 
 """
-    OperatorConstruct(ker,funcfbr,funclamp,img)
+    operator = OperatorConstruct(ker,funcfbr,funclamp,img)
 
 Construct the sparse matrix `M` with an interpolation kernel `ker`, the transformation polynomials `funcfbr` and `funclamp` and the original image `img` (for problem dimension)
-The sparse matrix is in a 1D form 
+The sparse matrix is in a 2D matrix form 
 
 example with identity polynomials: 
 
@@ -259,20 +261,30 @@ M = OperatorConstruct(ker,funcfbr,funclamp,img)
 """
 function OperatorConstruct(ker,funcfbr,funclamp,img::Matrix{Float64})
    
-    I = size(img)[1]
-    J = size(img)[2]
-    L = size(img)[1]
-    M = size(img)[2]
+    (I,J) = size(img)
+    (L,M) = size(img)
+
     operator = spzeros(I*J,L*M)
+
+    #deformed space scan
     for j in 1:J
         for i in 1:I
+
+            #Deformation derivation
             pl = funclamp(i,j)
             pm = funcfbr(i,j)
+
+            #non deformed space scan
             for l in max(Int.(ceil(pl-2)),1):min(Int.(floor(pm+2)),L)
                 for m in max(Int.(ceil(pm-2)),1):min(Int.(floor(pm+2)),M)
+
+                    #Matrix inexing
                     position1 = i + I*(j-1)
                     position2 = l + L*(m-1)
+
+                    #Operator construction
                     operator[position1,position2] = ker(l-pl)*ker(m-pm)
+
                 end
             end
         end
@@ -285,10 +297,10 @@ end
 
 
 """
-    function CreateTestSlitlet()
+    slitlet =  CreateTestSlitlet()
 
 
-Return a `fake slitlet` filled with index of pixels
+Return a `fake slitlet` filled with index of pixels (in the form of a 64x2048 matrix)
 """
 function CreateTestSlitlet()
 
@@ -321,12 +333,9 @@ end
 
 
 """
-    function CreateToySlitlet()
+    SlitletFibre, SlitletWave = CreateToySlitlet()
 
-usage : SlitletFibre, SlitletWave = CreateToySlitlet()
-
-Return two fake SINFONI slitlet mimiquing FIBRE and WAVE slitlet
- filled with gaussian simulated signal and added zero margin for deformation space
+Return two fake SINFONI slitlet mimiquing FIBRE and WAVE slitlet filled with gaussian simulated signal and added zero margin for deformation space (in the form of a 64x2048 matrix)
 
 """
 function CreateToySlitlet(gaussσ::Float64 = 1.)
@@ -366,13 +375,14 @@ end
 """
     AddNoise!(image::Matrix{Float64},μ::Float64,σ::Float64)
 
-Add normal noise to image
+Add normal noise (with parameter μ and σ) to image (alter the original image)
 
 """
 function AddNoise!(image::Matrix{Float64},μ::Float64,σ::Float64)
 
-    Dimλ = size(image)[1]
-    Dimx = size(image)[2]
+
+    (Dimλ,Dimx) = size(image)
+
 
 
     #Noise generation
@@ -388,13 +398,13 @@ end
 """
     AddOutlier!(image::Matrix{Float64},freq::Float64,amp::Float64)
 
-Add outlier to image, probabilitie of an outlier occuring in a pixel is based on the frequency `freq` parameter and its amplitude on `amp` parameter. 
+Add outlier to image, probabilitie of an outlier occuring in a pixel is based on the frequency `freq` parameter and its amplitude on `amp` parameter. (alter the original image)
 
 """
 function AddOutlier!(image::Matrix{Float64},freq::Float64,amp::Float64)
 
-    Dimλ = size(image)[1]
-    Dimx = size(image)[2]
+    (Dimλ,Dimx) = size(image)
+
 
     max = maximum(image)
     map = rand(Float64,(Dimλ,Dimx))
@@ -407,28 +417,25 @@ function AddOutlier!(image::Matrix{Float64},freq::Float64,amp::Float64)
 end
 
 """
-    AddMargin(image::Matrix{Float64},marginv::Int64,marginh::Int64)
+    imagewithmargin = AddMargin(image::Matrix{Float64},marginv::Int64,marginh::Int64)
 
 Add zero filled margin to an image. `marginv` is the vetical thicness of above and under margins. `marginh` is the horizontal thicness of left and right margins 
 
 """
 function AddMargin(image::Matrix{Float64},marginv::Int64,marginh::Int64)
         
-        sizev = size(image)[1]
-        sizeh = size(image)[2]
 
-        arrayv = zeros(Float64,sizev,marginh)
-        arrayh = zeros(Float64,marginv,sizeh)
-        corner = zeros(Float64,marginv,marginh)
+    (sizev,sizeh) = size(image)
+    arrayv = zeros(Float64,sizev,marginh)
+    arrayh = zeros(Float64,marginv,sizeh)
+    corner = zeros(Float64,marginv,marginh)
 
-        top = [corner arrayh corner]
-        bottom = copy(top)
+    top = [corner arrayh corner]
+    bottom = copy(top)
+    middle = [arrayv image arrayv]
+    result = [top;middle;bottom]
 
-        middle = [arrayv image arrayv]
-
-        result = [top;middle;bottom]
-
-        return result
+    return result
 end
 
 
@@ -678,7 +685,7 @@ end
 """
     MinCriteria(image::Matrix,order::Int,refpix::Tuple{Int,Int})
 
-Find the polynomials allowing image to be rectified
+Find the polynomials allowing image to be rectified (see section 2.2 of the report)
 `image and imrageref` reffer to fibre frames and `image2 and imageref2` reffer to wave frames. 
 `wgt` is a weight map with the same dimension than image or imageref.
 
@@ -689,10 +696,8 @@ function MinCriteria(image::Matrix{Float64},image2::Matrix{Float64},wgt::Matrix{
     iterator = 0
 
     #Get info once for all
-    dim1λ = size(image)[1]
-    dim1x = size(image)[2]
-    dim2λ = size(image)[1]
-    dim2x = size(image)[2]
+    (dim1λ ,dim1x) = size(image)
+    (dim2λ ,dim2x) = size(image2)
 
 
     #Reference contrast
@@ -1176,7 +1181,7 @@ end
 """
     ImgFilter(img::Matrix{Float64},uptresh::Float64,downtresh::Float64)
     
-Return the image filtered from points having intensity outsides μ ± σ*`boundaries`
+Return the image filtered from points having intensity outsides μ ± σ*`thresholds`
 """
 function ImgFilter(img::Matrix{Float64},uptresh::Float64,downtresh::Float64)
 
@@ -1203,7 +1208,7 @@ end
 """
     ImgFilter!(img::Matrix{Float64},uptresh::Float64,downtresh::Float64)
     
-Return the image filtered from points having intensity outsides μ ± σ*`boundaries` (temper with original image)
+Return the image filtered from points having intensity outsides μ ± σ*`thresholds` (temper with original image)
 """
 function ImgFilter!(img::Matrix{Float64},uptresh::Float64,downtresh::Float64)
 
@@ -1246,251 +1251,6 @@ function oldmain()
 
 end
 
-
-
-
-
-"""
-    main2()
-
-Toy Model (detector to sky version)
-"""
-function main2()
-
-    timestart = time()
-
-    gaussσ = 1.
-
-
-    FakeFibre, FakeWave = CreateToySlitlet(gaussσ) #Create the slitlets
-    #FakeFibre, FakeWave = CreateToySlitlet(1.,0.,0.) #Create the slitlets
-
-    noiseμ = maximum(FakeFibre)/10.
-    noiseσ = noiseμ/10.
-    outlier_frec = 0.01
-    outlier_amp= 100.
-    order = 2
-    axemult = 1
-
-
-    
-    rm("ToyModelImages",force=true,recursive = true)
-    mkdir("ToyModelImages")
-    f = FITS("ToyModelImages/ContrastFibre.fits", "w")
-    write(f,Contrast(FakeFibre,1))
-    close(f)
-    f = FITS("ToyModelImages/ContrastWave.fits", "w")
-    write(f,Contrast(FakeWave,2))
-    close(f)
-    f = FITS("ToyModelImages/FakeFibre.fits", "w")
-    write(f,FakeFibre)
-    close(f)
-    f = FITS("ToyModelImages/FakeWave.fits", "w")
-    write(f,FakeWave)
-    close(f)
-
-
-    #Generate 2 2DPolynomials with defined coefiscients
-
-    if order == 2
-        refpix = (0,0)
-        coef1 = [0.,0.,0.,1.005,0.05,0.]
-        coef2 = [0.,0.,0.0001,0.008,1.,0.]
-    end
-
-    if order == 1
-        refpix = (0,0)
-        coef1 = [1.,0.05,0.]
-        coef2 = [0.008,1.,0.]
-    end
-
-    #Adding noise
-    AddNoise!(FakeFibre,noiseμ,noiseσ)
-    AddNoise!(FakeWave,noiseμ,noiseσ)
-
-    """
-    #Adding outliers
-    AddOutlier!(DeformedFakeFibre,outlier_frec,outlier_amp)
-    AddOutlier!(DeformedFakeWave,outlier_frec,outlier_amp)
-    """
-
-    wgtmap = ones(size(FakeFibre)[1],size(FakeFibre)[2])
-
-    Poly1 = Poly2D(order,refpix,coef1)
-    Poly2 = Poly2D(order,refpix,coef2)
-
-    #Adding margin
-    λmax = size(FakeFibre)[1]*1.
-    xmax = size(FakeFibre)[2]*1.
-
-    marginλ = convert(Int64,round(Poly1(λmax,xmax)- λmax+1.)) 
-    marginx = convert(Int64,round(Poly2(λmax,xmax)- xmax+1.))
-
-    FakeFibre = AddMargin(FakeFibre,marginλ,marginx)
-    FakeWave= AddMargin(FakeWave,marginλ,marginx)
-
-
-
-    #generate axes for warp transformation
-    axess = MultAxes(axemult,FakeFibre)
-    
-    #Deform the images with ImageTransformations.warp 
-    DeformedFakeFibre = ImageWarp(FakeFibre,Poly1,Poly2,axess)
-    DeformedFakeWave = ImageWarp(FakeWave,Poly1,Poly2,axess)
-
-    f = FITS("ToyModelImages/DeformedFakeFibreNoNoise.fits", "w")
-    write(f,DeformedFakeFibre)
-    close(f)
-    f = FITS("ToyModelImages/DeformedFakeWaveNoNoise.fits", "w")
-    write(f,DeformedFakeWave)
-    close(f)
-
-    
-
-
-    """
-    #Filtering hot pixels and noise 
-    DeformedFakeFibre = ImgFilter(DeformedFakeFibreUnfiltered,3.,3.)
-    DeformedFakeWave = ImgFilter(DeformedFakeWaveUnfiltered,3.,3.)
-    """
-
-
-
-
-    log = open("ToyModelImages/log.txt", "a")
-    logtext = "Polynomials :
-
-    refpix = $refpix
-    order = $order
-    gaussσ = $gaussσ
-    noiseμ = $noiseμ
-    noiseσ = $noiseσ
-    outlier_frec = $outlier_frec
-    outlier_amp = $outlier_amp
-    marginλ = $marginλ
-    marginx = $marginx
-    axemult = $axemult
-       
-    coef1 = $coef1
-    map1 = $(Poly1.map)
-
-    coef2 = $coef2
-    map2 = $(Poly2.map)"
-    println(log,logtext)
-    close(log)
-
-    
-    
-    f = FITS("ToyModelImages/DeformedFakeFibre.fits", "w")
-    write(f,DeformedFakeFibre)
-    close(f)
-    f = FITS("ToyModelImages/ResDeformedFakeFibre.fits", "w")
-    write(f,Residual(FakeFibre,DeformedFakeFibre))
-    close(f)
-    f = FITS("ToyModelImages/DeformedFakeWave.fits", "w")
-    write(f,DeformedFakeWave)
-    close(f)
-    f = FITS("ToyModelImages/ResDeformedFakeWave.fits", "w")
-    write(f,Residual(FakeWave,DeformedFakeWave))
-    close(f)
-
-    """
-    coef3 = [0.985429,0.0180358,0.0182765]
-    coef4 = [-0.00981042,0.523253,0.00426099]
-    Poly3 = Poly2D(order,refpix,coef3)
-    Poly4 = Poly2D(order,refpix,coef4)
-    ReformedFakeFibre = ImageWarp(DeformedFakeFibre,Poly3,Poly4,axess)
-    f = FITS("ToyModelImages/ReformedFakeFibre.fits", "w")
-    write(f,ReformedFakeFibre)
-    close(f)
-    """
-
-
-    minimisation = MinCriteria(DeformedFakeFibre,DeformedFakeWave,wgtmap,order,refpix,FakeFibre,FakeWave;fitswriting = true)
-    
-    #Reinserting constant 
-    #push!(Optim.minimizer(minimisation[1]),1.)
-    #push!(Optim.minimizer(minimisation[1]),refpix[1])
-
-    #insert!(Optim.minimizer(minimisation[2]),size(Optim.minimizer(minimisation[2]))[1],1.)
-    #push!(Optim.minimizer(minimisation[2]),refpix[2])
-
-    log = open("ToyModelImages/log.txt", "a")
-    logtext = "
-    
-    Minimisation :
-
-    $(minimisation)
-
-    
-    minimizer :
-    
-    $(Optim.minimizer(minimisation))
-    
-    minimimum :
-    
-    $(Optim.minimum(minimisation))
-   
-    wallclock duration : $(time() - timestart) seconds"
-
-    println(log,logtext)
-    close(log)
-
-
-    reformcoef = vec(Optim.minimizer(minimisation))
-
-    
-    """
-    log = open("ToyModelImages/log.txt", "a")
-    logtext = "
-    
-    Minimisationfibre :
-
-    (minimisation[1])
-
-    Minimisationwave :
-
-    (minimisation[2])
-    
-    minimizer :
-    
-    (Optim.minimizer(minimisation[2]))
-    (Optim.minimizer(minimisation[1]))
-    
-    minimimum :
-    
-    (Optim.minimum(minimisation[2]))
-    (Optim.minimum(minimisation[1]))
-    
-    wallclock duration : (time() - timestart) seconds"
-
-    println(log,logtext)
-    close(log)
-
-
-    reformcoef = vec([Optim.minimizer(minimisation[2]) Optim.minimizer(minimisation[1])])
-    """
-
-    
-    finaldeformedfibre, finaldeformedwave = ReformSlitlet(reformcoef,order,refpix,DeformedFakeFibre,DeformedFakeWave,FakeFibre,FakeWave)
-
-    errorfibre = sum(Residual(FakeFibre,finaldeformedfibre).^2)/sum(Residual(FakeFibre,DeformedFakeFibre).^2)
-    errorwave = sum(Residual(FakeWave,finaldeformedwave).^2)/sum(Residual(FakeWave,DeformedFakeWave).^2)
-    log = open("ToyModelImages/log.txt", "a")
-    logtext = "
-    
-    errorfibre = $errorfibre
-    errorwave = $errorwave"
-
-    println(log,logtext)
-    println(logtext)
-    close(log)
-
-
-    return minimisation
-
-
-end
 
 
 """
@@ -1724,6 +1484,9 @@ function SlitletLoad(fitsname,directory,xmin::Int64,xmax::Int64,ymin::Int64,ymax
 
 end
 
+"""
+Obsolete main function
+"""
 function main()
 
     directory = "/home/unahzaal/Documents/StageM2/SINFONI_DHTAUB/reduceddatadirty/DH_TAU_B/06-11-2007/Step4/"
@@ -1834,117 +1597,3 @@ function main()
 
 end
 
-using Revise
-using FITSIO, EasyFITS
-using OptimPackNextGen.Powell
-using StatsBase,Statistics
-using InterpolationKernels
-
-
-"""
-    script()
-
-Toy Model (sky to detector version)
-"""
-function script()
-
-    #File handling to change for your system
-    directory = "/home/unahzaal/Documents/StageM2/SINFONI_DHTAUB/reduceddatadirty/DH_TAU_B/06-11-2007/Step4/"
-    fitsnamefibre = "out_ns_stack_0000.fits"
-    pathf = directory*fitsnamefibre
-    path = "/home/unahzaal/Documents/StageM2/SINFONI_DHTAUB/rawdata/"
-
-
-    lamp =read(FITS(path*"SINFO.2007-11-07T11:19:43.995.fits")[1])
-    fibre =read(FITS(pathf)[1])
-
-    dark = zeros(Float32,size(lamp)...,3)
-    dark[:,:,1] = read(FITS(path*"SINFO.2007-11-07T10:18:16.606.fits")[1])
-    dark[:,:,2] = read(FITS(path*"SINFO.2007-11-07T10:23:32.890.fits")[1])
-    dark[:,:,3] = read(FITS(path*"SINFO.2007-11-07T10:28:54.896.fits")[1])
-
-    #median filter
-    good = median(dark) .-  3*mad(dark) .< mean(dark,dims=3)[205:262,:,1] .< median(dark) .+  3*mad(dark)
-    medimg = mapwindow(median, median(dark,dims=3), (5,1,1)) .- median(dark,dims=3) 
-    good .*= median(medimg) .-  3*mad(medimg) .< median(medimg,dims=3)[205:262,:,1] .< median(medimg) .+  3*mad(medimg)
-
-    lmp = lamp[205:262,:]
-    lmp = convert(Matrix{Float64},lmp)
-    fbr = fibre[205:262,:]
-    fbr = convert(Matrix{Float64},fbr)
-
-
-    #ker = CatmullRomSpline(Float64)
-    #ker = CatmullRomSpline{Float64}() # there is an issue with different version of InterpolationKernels
-
-    ker = BSpline{3,Float64}()
-    indices =  -999:3000
-    #lamp cost functions for minimisation
-    function pcostl(x)
-        p  = projection(Val(:proj),indices, good', lmp', ker,(i,j) ->  i + x[1] + x[2]*1e-3*j + x[3]*1e-6*j*j);
-        return -sum(p[find_peaks(p; dist=15,nmax=30)])
-    end
-    #fibre cost functions for minimisation
-    function pcostf(x)
-        p  = projection(Val(:proj),indices, good, fbr, ker,(i,j) ->  i + x[1] + x[2]*1e-3*j + x[3]*1e-6*j*j);
-        return -sum(p[32:33])
-    end
-
-
-    x = [  0., 0., 0.];
-    #minimisation
-    (~,xl) = newuoa(pcostl, x, 1.,  1e-6; verbose = 2, maxeval = 500,check=false)
-    (~,xf) = newuoa(pcostf, x, 1.,  1e-6; verbose = 2, maxeval = 500,check=false)
-
-    #reconstruction polynomials
-    fcoord(i,j) =  i +  xl[1] + xl[2]*1e-3*j + xl[3]*1e-6*j*j
-    fcoordf(i,j) =  i +  xf[1] + xf[2]*1e-3*j + xf[3]*1e-6*j*j
-
-    #projection
-    spectre  = projection(Val(:proj), indices,good', lmp', ker,fcoord );
-    spectref  = projection(Val(:proj), indices,good, fbr, ker,fcoordf );
-
-    #deprojection
-    lampmodel = deprojection(spectre,axes(lmp'), ker,fcoord,indices);
-    fibremodel = deprojection(spectref,axes(fbr), ker,fcoordf,indices);
-
-    #deprojection of non deformed image
-    lampmodelnonfit = deprojection(spectre,axes(lmp'), ker,(i,j)->i,indices);
-    fibremodelnonfit = deprojection(spectref,axes(fbr), ker,(i,j)->i,indices);
-
-
-    tlampmodel = copy(lampmodel')
-    tfibremodel = copy(fibremodel')
-
-    f = FITS("ToyModelImages/lampmodel.fits", "w")
-    write(f,lampmodel)
-    close(f)
-    f = FITS("ToyModelImages/lampmodelnonfit.fits", "w")
-    write(f,lampmodelnonfit)
-    close(f)
-    f = FITS("ToyModelImages/lmp.fits", "w")
-    write(f,lmp)
-    close(f)
-    f = FITS("ToyModelImages/reslmp.fits", "w")
-    write(f,Residual(lampmodel,lampmodelnonfit))
-    close(f)
-    f = FITS("ToyModelImages/restrue.fits", "w")
-    write(f,Residual(lmp,tlampmodel))
-    close(f)
-    f = FITS("ToyModelImages/fibremodel.fits", "w")
-    write(f,fibremodel)
-    close(f)
-    f = FITS("ToyModelImages/fibremodelnonfit.fits", "w")
-    write(f,fibremodelnonfit)
-    close(f)
-    f = FITS("ToyModelImages/fbr.fits", "w")
-    write(f,fbr)
-    close(f)
-    f = FITS("ToyModelImages/resfbr.fits", "w")
-    write(f,Residual(fibremodel,fibremodelnonfit))
-    close(f)
-    f = FITS("ToyModelImages/restruef.fits", "w")
-    write(f,Residual(fbr,fibremodel))
-    close(f)
-
-end
